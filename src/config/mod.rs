@@ -70,8 +70,8 @@ pub fn init_config() -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn get_config() -> &'static AppConfig {
     CONFIG.get().unwrap_or_else(|| {
-        eprintln!("{}", "Configurations is not initialized");
-        exit(1);
+        init_config().unwrap();
+        CONFIG.get().unwrap()
     })
 }
 

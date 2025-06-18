@@ -6,13 +6,13 @@ use validator::Validate;
 
 static USERNAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9_]+$").unwrap());
 
-#[derive(Debug, Deserialize, Serialize, Validate, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, Validate, ToSchema)]
 pub struct CreateUserDto {
     #[validate(
         length(
-            min = 6,
+            min = 3,
             max = 100,
-            message = "The username must be between 6 and 100 characters"
+            message = "The username must be between 3 and 100 characters"
         ),
         regex(
             path = "*USERNAME_RE",
@@ -21,7 +21,7 @@ pub struct CreateUserDto {
     )]
     pub username: String,
 
-    #[validate(email(message = "The user mail is required"))]
+    #[validate(email(message = "El correo electrónico es obligatorio"))]
     pub email: String,
 
     #[validate(length(
@@ -39,9 +39,9 @@ pub struct UpdateUserDto {
 
     #[validate(
         length(
-            min = 6,
+            min = 3,
             max = 100,
-            message = "The username must be between 6 and 100 characters"
+            message = "The username must be between 3 and 100 characters"
         ),
         regex(
             path = "*USERNAME_RE",

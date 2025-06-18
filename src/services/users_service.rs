@@ -36,13 +36,19 @@ impl UsersService {
         let mut client = get_pg_client(&self.pool).await?;
         let tx = get_transaction(&mut client).await?;
 
-        let exists = tx
+        let exists = match tx
             .query_opt(
                 "SELECT 1 FROM users WHERE username = $1 OR email = $2 LIMIT 1",
                 &[&dto.username, &dto.email],
             )
             .await
-            .map_err(|e| map_db_error("Error verificando existencia previa de usuario", e))?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                error!(error= %e, "Error verificando la existencia previa del usuario");
+                return Err(HttpError::internal_server_error());
+            }
+        };
 
         if let Some(_) = exists {
             return Err(HttpError::conflict(
@@ -143,7 +149,7 @@ impl UsersService {
     pub async fn find_by_id(&self, id: i64) -> Result<User, (StatusCode, Json<HttpError>)> {
         let client = get_pg_client(&self.pool).await?;
 
-        let row_opt = client
+        let row_opt = match client
             .query_opt(
                 r#"
                     SELECT
@@ -159,7 +165,13 @@ impl UsersService {
                 &[&id],
             )
             .await
-            .map_err(|e| map_db_error("Error ejecutando búsqueda por ID", e))?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                error!(error = %e, "Error consultando el usuario por id");
+                return Err(HttpError::internal_server_error());
+            }
+        };
 
         let row = match row_opt {
             Some(r) => r,
@@ -204,7 +216,7 @@ impl UsersService {
     pub async fn find_by_email(&self, email: &str) -> Result<User, (StatusCode, Json<HttpError>)> {
         let client = get_pg_client(&self.pool).await?;
 
-        let row_opt = client
+        let row_opt = match client
             .query_opt(
                 r#"
                     SELECT 
@@ -221,7 +233,13 @@ impl UsersService {
                 &[&email],
             )
             .await
-            .map_err(|e| map_db_error("Error ejecutando query de find_by_email", e))?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                error!(error = %e, "Error consultando el usuario por email");
+                return Err(HttpError::internal_server_error());
+            }
+        };
 
         let row = match row_opt {
             Some(r) => r,
@@ -336,10 +354,13 @@ impl UsersService {
             idx
         );
 
-        let row_opt = tx
-            .query_opt(&sql, &params)
-            .await
-            .map_err(|e| map_db_error("Error actualizando usuario", e))?;
+        let row_opt = match tx.query_opt(&sql, &params).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!(error = %e, "Error actualizando el usuario");
+                return Err(HttpError::internal_server_error());
+            }
+        };
 
         let row = match row_opt {
             Some(r) => r,
@@ -401,15 +422,18 @@ impl UsersService {
         })?;
 
         let client = get_pg_client(&self.pool).await?;
-        client
-            .query_opt(statement, &[&hash, &id])
-            .await
-            .map_err(|e| map_db_error("Error al actualizar el usuario", e))?;
+        match client.query_opt(statement, &[&hash, &id]).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!(error = %e, "Error al actualizar el usuario");
+                return Err(HttpError::internal_server_error());
+            }
+        };
 
         Ok(())
     }
 
-    async fn set_user_status(&self, id: i64, status: i8) -> Result<(), ApiError> {
+    async fn set_user_status(&self, id: i64, status: i32) -> Result<(), ApiError> {
         let client = get_pg_client(&self.pool).await?;
         ensure_row_exists(&client, "users", "id", &id, "Usuario no encontrado").await?;
         let statement = r#"
@@ -417,13 +441,13 @@ impl UsersService {
             SET status = $1
             WHERE id = $2
         "#;
-        client
-            .query_opt(statement, &[&status, &id])
-            .await
-            .map_err(|e| {
+        match client.query_opt(statement, &[&status, &id]).await {
+            Ok(r) => r,
+            Err(e) => {
                 error!(error = %e, "Error al cambiar el status del usuario");
-                HttpError::internal_server_error()
-            })?;
+                return Err(HttpError::internal_server_error());
+            }
+        };
 
         Ok(())
     }
