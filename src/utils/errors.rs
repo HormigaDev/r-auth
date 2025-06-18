@@ -26,7 +26,7 @@ impl HttpError {
     }
 
     pub fn not_found(message: &str) -> (StatusCode, Json<Self>) {
-        Self::error("server", StatusCode::NOT_FOUND, message)
+        Self::error("client", StatusCode::NOT_FOUND, message)
     }
 
     pub fn unauthorized(message: &str) -> (StatusCode, Json<Self>) {
