@@ -1,6 +1,6 @@
 use axum::{Json, http::StatusCode};
 use r_auth_api::{
-    database::models::dto::{CreateUserDto, LoginRequest},
+    app::dto::{CreateUserDto, LoginRequest},
     services::UsersService,
 };
 

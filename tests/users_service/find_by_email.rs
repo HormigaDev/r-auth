@@ -1,7 +1,5 @@
 use axum::{Json, http::StatusCode};
-use r_auth_api::{
-    auth::verify_password, database::models::dto::CreateUserDto, services::UsersService,
-};
+use r_auth_api::{app::dto::CreateUserDto, auth::verify_password, services::UsersService};
 
 use crate::common;
 

@@ -69,3 +69,13 @@ pub struct ChangePasswordDto {
     ))]
     pub new_password: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
+pub struct ConfirmTfaDto {
+    #[validate(range(
+        min = 100_000,
+        max = 999_999,
+        message = "El código debe tener 6 dígitos"
+    ))]
+    pub code: u32,
+}

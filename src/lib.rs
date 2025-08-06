@@ -1,3 +1,4 @@
+pub mod app;
 pub mod auth;
 pub mod config;
 pub mod database;
@@ -19,6 +20,7 @@ use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
+    config::Environment,
     database::connection::{GLOBAL_DB_POOL, initialize_global_db_pool},
     services::UsersService,
 };
@@ -62,11 +64,30 @@ pub async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         .merge(SwaggerUi::new("/docs").url("/openapi.json", openapi.clone()))
         .nest("/api", handlers::api_routes(state));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3032").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", &cfg.port))
+        .await
+        .unwrap();
+    let url = match cfg.environment {
+        Environment::Development => format!("{}:{}", &cfg.host, &cfg.port),
+        Environment::Production => format!("{}", &cfg.host),
+    };
+
     println!(
         "{}",
-        format!("Servidor corriendo en el puerto {}", "3032".yellow()).green()
+        format!("Servidor corriendo en {}", url.yellow()).green()
     );
+
+    if cfg.environment == Environment::Development {
+        println!(
+            "{}",
+            format!(
+                "Documentación disponible en {}:{}/docs",
+                &cfg.host.yellow(),
+                &cfg.port
+            )
+            .green()
+        );
+    }
 
     Ok(axum::serve(listener, app).await.unwrap())
 }

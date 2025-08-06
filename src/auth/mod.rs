@@ -1,8 +1,13 @@
+pub mod tfa;
+
 use crate::{
     config::get_config,
     database::{
         connection::GLOBAL_DB_POOL,
-        models::{claims::Claims, entities::user::User},
+        models::{
+            claims::Claims,
+            entities::user::{User, UserStatus},
+        },
     },
     utils::errors::HttpError,
 };
@@ -132,8 +137,8 @@ where
                     }
                 };
                 let user = match user.status {
-                    1 => user,
-                    2 => return Err(HttpError::forbbiden("Usuario inactivo")),
+                    UserStatus::Active => user,
+                    UserStatus::Inactive => return Err(HttpError::forbbiden("Usuario inactivo")),
                     _ => return Err(HttpError::not_found("Usuario no encontrado")),
                 };
 
@@ -160,4 +165,60 @@ pub fn validate_password(password: &str) -> Result<bool, (StatusCode, Json<HttpE
     }
 
     Ok(is_valid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dotenv::dotenv;
+
+    #[ctor::ctor]
+    fn init() {
+        dotenv().ok();
+    }
+
+    #[test]
+    fn hash_password_test() {
+        let password = "SecurePassword@123";
+        let hash = hash_password(password);
+
+        assert!(
+            hash.is_ok(),
+            "La contraseña debería hashearse correctamente"
+        );
+    }
+
+    #[test]
+    fn verify_password_test() {
+        let password = "SecurePassword@123";
+        let hash = hash_password(&password).unwrap();
+
+        let result = verify_password(&password, &hash);
+
+        assert_eq!(
+            result, true,
+            "La contraseña debería verificarse correctamente y devolver true"
+        );
+    }
+
+    #[test]
+    fn generate_token_test() {
+        let claims = Claims::new(1.to_string(), 60);
+        let result = generate_jwt(claims);
+
+        assert!(result.is_ok(), "El token debería crearse correctamente");
+    }
+
+    #[test]
+    fn verify_token_test() {
+        let claims = Claims::new(1.to_string(), 60);
+        let token = generate_jwt(claims).unwrap();
+
+        let result = decode_jwt(&token);
+
+        assert!(
+            result.is_ok(),
+            "El token debería decodificarse correctamente"
+        );
+    }
 }

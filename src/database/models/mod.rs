@@ -1,5 +1,4 @@
 pub mod claims;
-pub mod dto;
 pub mod entities;
 
 use serde::{Deserialize, Serialize};
