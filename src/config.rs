@@ -1,6 +1,7 @@
 use colored::Colorize;
 use once_cell::sync::OnceCell;
 use std::process::exit;
+use tracing::error;
 
 const PASSWORD_HASH_MEMORY_COST: &str = "PASSWORD_HASH_MEMORY_COST";
 const PASSWORD_HASH_TIME_COST: &str = "PASSWORD_HASH_TIME_COST";
@@ -9,6 +10,8 @@ const PASSWORD_HASH_LENGTH: &str = "PASSWORD_HASH_LENGTH";
 const JWT_SECRET: &str = "JWT_SECRET";
 const DATABASE_URL: &str = "DATABASE_URL";
 const RUST_ENVIRONMENT: &str = "RUST_ENVIRONMENT";
+const APP_HOST: &str = "APP_HOST";
+const APP_PORT: &str = "APP_PORT";
 
 pub struct PasswordHashingConfig {
     pub hash_length: u32,
@@ -30,9 +33,11 @@ pub struct AppConfig {
     pub auth: AuthConfig,
     pub db: DbConfig,
     pub environment: Environment,
+    pub host: String,
+    pub port: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Environment {
     Development,
     Production,
@@ -51,6 +56,8 @@ pub fn init_config() -> Result<(), Box<dyn std::error::Error>> {
         "production" => Environment::Production,
         _ => Environment::Development,
     };
+    let host = get_env(APP_HOST);
+    let port = get_env_number(APP_PORT);
 
     let config = AppConfig {
         password: PasswordHashingConfig {
@@ -62,6 +69,8 @@ pub fn init_config() -> Result<(), Box<dyn std::error::Error>> {
         auth: AuthConfig { secret: jwt_secret },
         db: DbConfig { database_url },
         environment,
+        host,
+        port,
     };
 
     CONFIG.set(config).map_err(|_| "Config ya inicializada")?;
@@ -76,7 +85,8 @@ pub fn get_config() -> &'static AppConfig {
 }
 
 fn get_env(key: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| {
+    std::env::var(key).unwrap_or_else(|e| {
+        error!(error = %e, "{}", (format!("Error obteniendo la variable {}", key)).as_str());
         eprintln!(
             "{}",
             format!("The env variable {} is not configured", key.yellow()).red()

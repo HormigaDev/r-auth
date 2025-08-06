@@ -2,11 +2,10 @@ use utoipa::OpenApi;
 
 use crate::{
     ApiInfo,
-    database::models::{
-        FindQuery, FindResult, OneResult,
-        dto::{ChangePasswordDto, CreateUserDto, LoginRequest, LoginResponse, UpdateUserDto},
-        entities::user::User,
+    app::dto::{
+        ChangePasswordDto, ConfirmTfaDto, CreateUserDto, LoginRequest, LoginResponse, UpdateUserDto,
     },
+    database::models::{FindQuery, FindResult, OneResult, entities::user::User},
     utils::{MessageResponse, errors::HttpError},
 };
 
@@ -25,6 +24,8 @@ use crate::{
         crate::handlers::users_handler::inactive_myself,
         crate::handlers::users_handler::delete_user,
         crate::handlers::users_handler::delete_myself,
+        crate::handlers::users_handler::enable_tfa,
+        crate::handlers::users_handler::confirm_tfa,
     ),
     components(schemas(
         LoginRequest,
@@ -38,7 +39,8 @@ use crate::{
         User,
         MessageResponse,
         HttpError,
-        ApiInfo
+        ApiInfo,
+        ConfirmTfaDto
     )),
     tags(
         (name = "Users", description = "Operaciones relacionadas con usuarios")

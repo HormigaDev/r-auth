@@ -2,21 +2,23 @@ use std::sync::Arc;
 
 use crate::{
     AppState,
-    auth::AuthenticatedClaims,
-    database::models::{
-        FindQuery, FindResult, OneResult,
-        dto::{ChangePasswordDto, CreateUserDto, LoginRequest, LoginResponse, UpdateUserDto},
-        entities::user::User,
+    app::dto::{
+        ChangePasswordDto, ConfirmTfaDto, CreateUserDto, LoginRequest, LoginResponse, UpdateUserDto,
     },
+    auth::AuthenticatedClaims,
+    database::models::{FindQuery, FindResult, OneResult, entities::user::User},
     services::UsersService,
     utils::{ApiError, ApiResult, MessageResponse, Permissions, errors::HttpError},
 };
 use axum::{
     Json, Router,
+    body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{Response, StatusCode},
+    response::IntoResponse,
     routing::{delete, get, patch, post, put},
 };
+use tracing::error;
 
 pub fn users_routes(state: AppState) -> Router {
     let service = state.users_service.clone();
@@ -33,6 +35,8 @@ pub fn users_routes(state: AppState) -> Router {
         .route("/inactive/{id}", put(inactive_user))
         .route("/me", delete(delete_myself))
         .route("/{id}", delete(delete_user))
+        .route("/tfa/enable", put(enable_tfa))
+        .route("/tfa/confirm", post(confirm_tfa))
         .with_state(service)
 }
 
@@ -322,4 +326,79 @@ pub async fn delete_myself(
         .map_err(|_| HttpError::bad_request("Id de usuario inválido"))?;
     service.delete(id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    put,
+    path = "/users/tfa/enable",
+    tag = "Users",
+    responses(
+        (status = 200, description = "QR generado para TFA", content_type = "image/png"),
+        (status = 400, description = "ID inválido", body = HttpError),
+        (status = 500, description = "Error al generar QR", body = HttpError)
+    ),
+    security(("bearerAuth" = []))
+)]
+pub async fn enable_tfa(
+    AuthenticatedClaims(claims): AuthenticatedClaims,
+    State(service): State<Arc<UsersService>>,
+) -> Result<Response<Body>, ApiError> {
+    claims.require_permission(Permissions::UPDATE_MYSELF)?;
+
+    let id: i64 = claims
+        .user_id
+        .parse()
+        .map_err(|_| HttpError::bad_request("Id de usuario inválido"))?;
+
+    let tfa = service.enable_tfa(id).await?;
+
+    let user = service.find_by_id(id).await?;
+    let email = user.email;
+    let issuer = "R-AUTH";
+
+    let qr_png = tfa.generate_qr_code(&email, issuer).map_err(|e| {
+        error!(error = %e, "Error al generar el QR para TFA");
+        HttpError::internal_server_error()
+    })?;
+
+    Ok((StatusCode::OK, [("Content-Type", "image/png")], qr_png).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/users/tfa/confirm",
+    tag = "Users",
+    request_body = ConfirmTfaDto,
+    responses(
+        (status = 200, description = "TFA confirmado exitosamente", body = MessageResponse),
+        (status = 401, description = "Código inválido", body = HttpError),
+        (status = 400, description = "ID o código inválido", body = HttpError),
+        (status = 500, description = "Error inesperado", body = HttpError)
+    ),
+    security(("bearerAuth" = []))
+)]
+pub async fn confirm_tfa(
+    AuthenticatedClaims(claims): AuthenticatedClaims,
+    State(service): State<Arc<UsersService>>,
+    Json(payload): Json<ConfirmTfaDto>,
+) -> ApiResult<MessageResponse> {
+    claims.require_permission(Permissions::UPDATE_MYSELF)?;
+
+    let id: i64 = claims
+        .user_id
+        .parse()
+        .map_err(|_| HttpError::bad_request("ID de usuario inválido"))?;
+
+    let is_confirmed = service.confirm_tfa(id, payload.code).await?;
+
+    if is_confirmed {
+        Ok((
+            StatusCode::OK,
+            Json(MessageResponse {
+                message: "Autenticación de dos factores confirmada correctamente".to_string(),
+            }),
+        ))
+    } else {
+        Err(HttpError::unauthorized("Código inválido"))
+    }
 }

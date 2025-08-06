@@ -1,17 +1,19 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use axum::{Json, http::StatusCode};
 use tracing::error;
 use validator::Validate;
 
 use crate::{
-    auth::{generate_jwt, hash_password, validate_password, verify_password},
+    app::dto::{ChangePasswordDto, CreateUserDto, LoginRequest, UpdateUserDto},
+    auth::{
+        generate_jwt, hash_password,
+        tfa::{Tfa, TfaStatus},
+        validate_password, verify_password,
+    },
     database::{
         connection::PgPool,
-        models::{
-            FindQuery, FindResult,
-            claims::Claims,
-            dto::{ChangePasswordDto, CreateUserDto, LoginRequest, UpdateUserDto},
-            entities::user::User,
-        },
+        models::{FindQuery, FindResult, claims::Claims, entities::user::User},
     },
     utils::{
         ApiError, USER_PERMISSIONS, check_duplicate, commit_transaction, ensure_row_exists,
@@ -158,6 +160,8 @@ impl UsersService {
                         email,
                         permissions,
                         status,
+                        use_tfa,
+                        tfa_secret,
                         created_at,
                         updated_at
                     FROM users WHERE id = $1 LIMIT 1
@@ -195,6 +199,8 @@ impl UsersService {
                         password,
                         permissions,
                         status,
+                        use_tfa,
+                        tfa_secret,
                         created_at,
                         updated_at
                     FROM users WHERE id = $1 LIMIT 1
@@ -226,6 +232,8 @@ impl UsersService {
                         password,
                         permissions,
                         status,
+                        use_tfa,
+                        tfa_secret,
                         created_at,
                         updated_at
                     FROM users WHERE email = $1
@@ -347,6 +355,8 @@ impl UsersService {
                     email,
                     permissions,
                     status,
+                    use_tfa,
+                    tfa_secret,
                     created_at,
                     updated_at
             "#,
@@ -458,5 +468,101 @@ impl UsersService {
 
     pub async fn delete(&self, id: i64) -> Result<(), ApiError> {
         self.set_user_status(id, 3).await
+    }
+
+    pub async fn enable_tfa(&self, id: i64) -> Result<Tfa, ApiError> {
+        let client = get_pg_client(&self.pool).await?;
+        ensure_row_exists(&client, "users", "id", &id, "Usuario no encontrado").await?;
+
+        let secret = Tfa::generate_secret().map_err(|e| {
+            error!(error = %e, "Error al generar el secreto TFA");
+            HttpError::internal_server_error()
+        })?;
+
+        let statement = r#"
+            UPDATE users
+            SET
+                tfa_status = $1,
+                tfa_secret = $2
+            WHERE id = $3
+        "#;
+
+        client
+            .execute(statement, &[&TfaStatus::Pending, &secret, &id])
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Error al guardar el secreto TFA en base de datos");
+                HttpError::internal_server_error()
+            })?;
+
+        let tfa = Tfa::new(&secret);
+
+        Ok(tfa)
+    }
+
+    pub async fn confirm_tfa(&self, id: i64, code: u32) -> Result<bool, ApiError> {
+        let client = get_pg_client(&self.pool).await?;
+        ensure_row_exists(&client, "users", "id", &id, "Usuario no encontrado").await?;
+
+        let query = r#"
+            SELECT tfa_status, tfa_secret FROM users WHERE id = $1
+        "#;
+
+        let row = client.query_opt(query, &[&id]).await.map_err(|e| {
+            error!(error = %e, "Error al consultar estado TFA");
+            HttpError::internal_server_error()
+        })?;
+
+        let row = match row {
+            Some(r) => r,
+            None => return Err(HttpError::not_found("Usuario no encontrado")),
+        };
+
+        let tfa_status: TfaStatus = row.try_get("tfa_status").map_err(|e| {
+            error!(error = %e, "Error al leer tfa_status");
+            HttpError::internal_server_error()
+        })?;
+
+        let tfa_secret: String = row.try_get("tfa_secret").map_err(|e| {
+            error!(error = %e, "Error al leer tfa_secret");
+            HttpError::internal_server_error()
+        })?;
+
+        if tfa_status != TfaStatus::Pending {
+            return Err(HttpError::forbbiden(
+                "Autenticación de dos factores ya configurada",
+            ));
+        }
+
+        let tfa = Tfa::new(&tfa_secret);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| {
+                error!(error = %e, "Error obteniendo el tiempo actual");
+                HttpError::internal_server_error()
+            })?
+            .as_secs();
+
+        // Verificación TOTP con tolerancia de ±1 paso (30s por paso)
+        let confirmed = (-1..=1).any(|offset| {
+            let ts = timestamp.wrapping_add((offset * 30) as u64);
+            tfa.verify_totp(code, ts).unwrap_or(false)
+        });
+
+        if confirmed {
+            let update_stmt = r#"
+                UPDATE users SET tfa_status = $1 WHERE id = $2
+            "#;
+
+            client
+                .execute(update_stmt, &[&TfaStatus::Enabled, &id])
+                .await
+                .map_err(|e| {
+                    error!(error = %e, "Error al actualizar estado TFA a 'Enabled'");
+                    HttpError::internal_server_error()
+                })?;
+        }
+
+        Ok(confirmed)
     }
 }
